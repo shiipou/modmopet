@@ -7,7 +7,7 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 import 'package:modmopet/src/entity/game.dart';
 import 'package:modmopet/src/entity/mod.dart';
 import 'package:modmopet/src/service/filesystem/platform_filesystem.dart';
-import 'package:modmopet/src/service/github.dart';
+import 'package:modmopet/src/service/github/github.dart';
 import 'package:modmopet/src/service/logger.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 part 'git_source.freezed.dart';
@@ -69,19 +69,25 @@ Future<void> updateSources(UpdateSourcesRef ref) async {
 
   // Only check for update if game has configured sources
   if (availableGitSources.isNotEmpty) {
-    await _doUpdateIteration(game!.id, selectedSource ?? availableGitSources.first, ref);
+    await _doUpdateIteration(
+        game!.id, selectedSource ?? availableGitSources.first, ref);
   }
 }
 
-Future<void> _doUpdateIteration(String gameTitleId, GitSource source, FutureProviderRef ref) async {
-  final latestRelease = await GithubService.instance.getLatestRelease(source);
+Future<void> _doUpdateIteration(
+    String gameTitleId, GitSource source, FutureProviderRef ref) async {
+  debugPrint('Check for new update');
+  final latestRelease = await GithubClient().getLatestRelease(source);
   final latestGithubReleaseId = latestRelease.id;
-  String? latestReleaseId = await PlatformFilesystem.instance.readFromLocal('latestReleaseId');
+  String? latestReleaseId =
+      await PlatformFilesystem.instance.readFromLocal('latestReleaseId');
 
   if (latestGithubReleaseId == null) {
-    LoggerService.instance.log('Update Manager: Error. Unable to get latest release id.');
+    LoggerService.instance
+        .log('Update Manager: Error. Unable to get latest release id.');
   } else if (latestReleaseId == null) {
-    LoggerService.instance.log('Update Manager: No local release id file found. Updating.');
+    LoggerService.instance
+        .log('Update Manager: No local release id file found. Updating.');
 
     // Write release id to file and download the archive from github
     await _doUpdateReleaseIdFile(latestGithubReleaseId);
@@ -104,27 +110,34 @@ Future<void> _doUpdateIteration(String gameTitleId, GitSource source, FutureProv
 }
 
 Future<void> _doUpdateReleaseIdFile(int latestGithubReleaseId) async {
-  PlatformFilesystem.instance.writeForLocal('latestReleaseId', latestGithubReleaseId.toString(), replace: true);
+  PlatformFilesystem.instance.writeForLocal(
+      'latestReleaseId', latestGithubReleaseId.toString(),
+      replace: true);
 }
 
-Future<void> _doDownloadAndSaveArchive(String gameTitleId, GitSource source) async {
-  final Directory gameRootDirectory = await PlatformFilesystem.instance.gameRootDirectory(gameTitleId.toUpperCase());
+Future<void> _doDownloadAndSaveArchive(
+    String gameTitleId, GitSource source) async {
+  final Directory gameRootDirectory = await PlatformFilesystem.instance
+      .gameRootDirectory(gameTitleId.toUpperCase());
   if (!await gameRootDirectory.exists()) {
-    await PlatformFilesystem.instance.createDirectory(gameRootDirectory, replace: true);
+    await PlatformFilesystem.instance
+        .createDirectory(gameRootDirectory, replace: true);
   }
 
   // Download, extract, delete zipfile
   LoggerService.instance.log('Update Manager: Downloading zipball...');
-  final latestRelease = await GithubService.instance.getLatestRelease(source);
+  final latestRelease = await GithubClient().getLatestRelease(source);
 
   // Try to find asset by name, since we want the full release
   final releaseAssets = latestRelease.assets;
-  final fullReleaseAsset = releaseAssets?.singleWhere((element) => element.name!.contains('full.zip'));
+  final fullReleaseAsset = releaseAssets
+      ?.singleWhere((element) => element.name!.contains('full.zip'));
   if (fullReleaseAsset != null) {
-    final File zipballFile = await PlatformFilesystem.instance.getUserFile(
+    final File zipballFile = File(
       '${gameRootDirectory.path}${Platform.pathSeparator}${fullReleaseAsset.name}.zip',
     );
-    final response = await Dio().download(fullReleaseAsset.browserDownloadUrl!, zipballFile.path);
+    final response = await Dio()
+        .download(fullReleaseAsset.browserDownloadUrl!, zipballFile.path);
 
     if (response.statusCode == 200) {
       LoggerService.instance.log('Update Manager: Downloading successfull...');
@@ -134,7 +147,7 @@ Future<void> _doDownloadAndSaveArchive(String gameTitleId, GitSource source) asy
       );
 
       if (await sourceFolder.exists()) {
-        sourceFolder.delete();
+        sourceFolder.delete(recursive: true);
       }
 
       await _unzipSource(zipballFile, sourceFolder);
@@ -149,6 +162,7 @@ Future<void> _unzipSource(File zipFile, Directory to) async {
 
   // Extract archive to given directory path
   extractArchiveToDisk(archive, to.path);
+  inputStream.close();
 
   // Delete old zip file after file extraction
   if (await zipFile.exists()) {
